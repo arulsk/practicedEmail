@@ -3,24 +3,24 @@ const { simpleParser } = require('mailparser');
 const moment = require('moment');
 
 const emailConfig = {
-    user: '',
-    password: '',
+    user: 'arulk1535@gmail.com',
+    password: 'krusqtvqowqauoxh',
     host: 'imap.gmail.com',
     port: 993,
     tls: true,
     tlsOptions: { rejectUnauthorized: false } // Ignore certificate validation
 };
 
-const getEmails = (res) => {
+const getEmails = (req,res) => {
+    const fromMail = req.params.fromMail;
     const imap = new Imap(emailConfig);
-    let responseSent = false; // Flag to track if response has been sent
-
+    let responseSent = false; 
     imap.once('error', (err) => {
         console.error('IMAP connection error:', err);
         imap.end();
         if (!responseSent) {
             responseSent = true;
-            res.status(500).json({ message: err.message });
+            res.status(500).json({ message : err.message });
         }
     });
 
@@ -42,18 +42,19 @@ const getEmails = (res) => {
 
             const searchCriteria = [
                 ['ALL'],
-                ['SINCE', moment().subtract(20, 'days').format('YYYY-MM-DD')],
-                ['from', 'rohit104529@gmail.com']
+                ['SINCE', moment().subtract(5, 'days').format('YYYY-MM-DD')],
+                ['from', fromMail]
             ];
             
 
             imap.search(searchCriteria, (searchErr, results) => {
                 if (searchErr) {
                     console.error('Error searching emails:', searchErr);
-                    imap.end();
+                    
                     if (!responseSent) {
                         responseSent = true;
                         res.status(500).json({ message: searchErr.message });
+                        imap.end();
                     }
                     return;
                 }
@@ -63,7 +64,7 @@ const getEmails = (res) => {
                     imap.end();
                     if (!responseSent) {
                         responseSent = true;
-                        res.status(404).json({ message: 'No unread emails found.' });
+                        res.status(404).json({ message: 'No  emails found.' });
                     }
                     return;
                 }
@@ -71,8 +72,122 @@ const getEmails = (res) => {
                 const emails = [];
 
                 const fetchOptions = {
-                    bodies: ['HEADER', 'TEXT'],
-                    markSeen: false // Mark emails as read after fetching
+                    bodies:"",
+                    markSeen: false,
+                    uids: true
+
+                };
+
+                const fetch = imap.fetch(results, fetchOptions);
+                fetch.on('message', (msg, seqno) => {
+                    msg.on('body', (stream, info) => {
+                        simpleParser(stream, async (parseErr, parsed) => {
+                            if (parseErr) {
+                                console.error('Error parsing email:', parseErr);
+                                if (!responseSent) {
+                                    responseSent = true;
+                                    res.status(500).json({ message: parseErr.message });
+                                }
+                                return;
+                            }
+
+                            emails.push({                            
+                                uids : seqno,
+                                from: parsed.from && parsed.from.text ? parsed.from.text : ' from email is not found',
+                                subject: parsed.subject ? parsed.subject : 'subject is not found!!',
+                                text: parsed.text ? parsed.text : 'text is not found'
+
+                            });
+                        });
+                    });
+                });
+                fetch.once('error',(err)=>{
+                    imap.end();
+                    if (!responseSent) {
+                        responseSent = true;
+                        res.status(200).json({error : err.message});
+                    }
+                })
+                fetch.once('end', () => {
+                    imap.end();
+                    if (!responseSent) {
+                        responseSent = true;
+                        res.status(200).json({emails,len : emails.length,});
+                    }
+                });
+            });
+        });
+    });
+
+    imap.connect();
+};
+
+
+const subjectMail =  (req,res) => {
+    const fromSubject = req.params.fromSubject;
+    const imap = new Imap(emailConfig);
+    let responseSent = false; // Flag to track if response has been sent
+
+    imap.once('error', (err) => {
+        console.error('IMAP connection error:', err);
+        imap.end();
+        if (!responseSent) {
+            responseSent = true;
+            res.status(500).json({ message: err.message });
+        }
+       
+    });
+
+    imap.once('end', () => {
+        console.log('IMAP connection ended');
+    });
+
+    imap.once('ready', () => {
+        imap.openBox('INBOX', false, (err, box) => {
+            if (err) {
+                console.error('Error opening INBOX:', err);
+                imap.end();
+                if (!responseSent) {
+                    responseSent = true;
+                    res.status(500).json({ message: err.message });
+                }
+                return;
+            }
+
+            const searchCriteria = [
+                ['ALL'],
+                ['SINCE', moment().subtract(5, 'days').format('YYYY-MM-DD')],
+                ['SUBJECT', fromSubject]
+            ];
+            imap.search(searchCriteria, (searchErr, results) => {
+                if (searchErr) {
+                    console.error('Error searching emails:', searchErr);
+                    
+                    if (!responseSent) {
+                        responseSent = true;
+                        res.status(500).json({ message: searchErr.message });
+                        imap.end();
+                    }
+                    return;
+                }
+
+                if (results.length === 0) {
+                    console.log('No unread emails found.');
+                    imap.end();
+                    if (!responseSent) {
+                        responseSent = true;
+                        res.status(404).json({ message: 'No  emails found.' });
+                    }
+                    return;
+                }
+
+                const emails = [];
+
+                const fetchOptions = {
+                    bodies: "",
+                    markSeen: false,
+                    uids: true
+
                 };
 
                 const fetch = imap.fetch(results, fetchOptions);
@@ -89,6 +204,7 @@ const getEmails = (res) => {
                             }
 
                             emails.push({
+                                uids  : seqno,
                                 from: parsed.from && parsed.from.text ? parsed.from.text : ' from email is not found',
                                 subject: parsed.subject ? parsed.subject : 'subject is not found!!',
                                 text: parsed.text ? parsed.text : 'text is not found'
@@ -96,11 +212,18 @@ const getEmails = (res) => {
                         });
                     });
                 });
+                fetch.once('error',(err)=>{
+                    imap.end();
+                    if (!responseSent) {
+                        responseSent = true;
+                        res.status(200).json({error : err.message});
+                    }
+                })
                 fetch.once('end', () => {
                     imap.end();
                     if (!responseSent) {
                         responseSent = true;
-                        res.status(200).json(emails);
+                        res.status(200).json({emails,len :  emails.length});
                     }
                 });
             });
@@ -111,7 +234,9 @@ const getEmails = (res) => {
 };
 
 const email = (req, res) => {
-    getEmails(res);
+    getEmails(req,res);
 };
-
-module.exports = { email };
+const subject = (req,res)=>{
+subjectMail(req,res)    
+}
+module.exports = { email,subject };
